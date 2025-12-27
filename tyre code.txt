@@ -1,0 +1,113 @@
+#include <ESP8266WiFi.h>
+#include <ThingSpeak.h>
+
+// HX710B pins
+#define DATA_PIN 12  // HX710B data pin (D6)
+#define SCK_PIN 14   // HX710B clock pin (D5)
+
+// LED pins
+#define GREEN_LED_PIN 16 // Green LED (D0)
+#define RED_LED_PIN 5    // Red LED (D1)
+
+// Wi-Fi credentials
+const char* ssid = "NESARA-JIO";      // Replace with your Wi-Fi SSID
+const char* password = "dayarani1234"; // Replace with your Wi-Fi Password
+
+// ThingSpeak setup
+WiFiClient client;
+unsigned long channelID = 1060859;        // Replace with your ThingSpeak channel ID
+const char* writeAPIKey = "YV59QHJTUD3XTNM4";   // Replace with your ThingSpeak Write API Key
+
+// Pressure threshold
+const float PRESSURE_THRESHOLD = 10.0; // Example threshold in PSI/kPa
+
+// Function to read 24-bit data from HX710B
+long readHX710B() {
+  long result = 0;
+
+  // Wait until DATA line goes low, indicating data is ready
+  while (digitalRead(DATA_PIN));
+
+  // Read 24 bits from HX710B
+  for (int i = 0; i < 24; i++) {
+    digitalWrite(SCK_PIN, HIGH);
+    delayMicroseconds(1);
+    result = (result << 1) | digitalRead(DATA_PIN);
+    digitalWrite(SCK_PIN, LOW);
+    delayMicroseconds(1);
+  }
+
+  // Optional: Read extra clock pulses to complete communication
+  digitalWrite(SCK_PIN, HIGH);
+  delayMicroseconds(1);
+  digitalWrite(SCK_PIN, LOW);
+
+  // Convert result to signed value
+  if (result & 0x800000) { 
+    result |= 0xFF000000;  // Sign extension for 24-bit data
+  }
+  return result;
+}
+
+void setup() {
+  // Initialize HX710B pins
+  pinMode(DATA_PIN, INPUT);
+  pinMode(SCK_PIN, OUTPUT);
+  digitalWrite(SCK_PIN, LOW);
+
+  // Initialize LED pins
+  pinMode(GREEN_LED_PIN, OUTPUT);
+  pinMode(RED_LED_PIN, OUTPUT);
+  digitalWrite(GREEN_LED_PIN, LOW); // Turn off Green LED initially
+  digitalWrite(RED_LED_PIN, LOW);  // Turn off Red LED initially
+
+  // Initialize Serial Monitor
+  Serial.begin(115200);
+
+  // Initialize Wi-Fi
+  Serial.println("Connecting to Wi-Fi...");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(1000);
+  }
+  Serial.println("\nConnected to Wi-Fi!");
+
+  // Initialize ThingSpeak
+  ThingSpeak.begin(client);
+
+  Serial.println("HX710B Pressure Sensor Test");
+}
+
+void loop() {
+  // Read pressure data from HX710B
+  long adcValue = readHX710B();
+  float pressure = (adcValue / 16777215.0) * 100.0; // Example conversion to pressure
+  // Adjust scale factor based on calibration and sensor specifications
+
+  Serial.print("Raw ADC Value: ");
+  Serial.print(adcValue);
+  Serial.print("\tPressure: ");
+  Serial.print(pressure);
+  Serial.println(" PSI / kPa");
+
+  // Control LEDs based on pressure
+  if (pressure > PRESSURE_THRESHOLD) {
+    digitalWrite(GREEN_LED_PIN, HIGH); // Green LED ON
+    digitalWrite(RED_LED_PIN, LOW);   // Red LED OFF
+  } else {
+    digitalWrite(GREEN_LED_PIN, LOW); // Green LED OFF
+    digitalWrite(RED_LED_PIN, HIGH); // Red LED ON
+  }
+
+  // Send pressure data to ThingSpeak
+  int responseCode = ThingSpeak.writeField(channelID, 1, pressure, writeAPIKey);
+  if (responseCode == 200) {
+    Serial.println("Data sent to ThingSpeak successfully!");
+  } else {
+    Serial.print("Failed to send data to ThingSpeak. Error code: ");
+    Serial.println(responseCode);
+  }
+
+  delay(20000); // Update ThingSpeak every 10 seconds
+}
